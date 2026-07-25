@@ -238,6 +238,9 @@ If you use the **"Block hotkey"** option, or if you disable window snapping (Win
   - DisableWinSpace: false
     $name: Win+Space
     $description: Switch keyboard layout
+  - DisableWinShiftR: false
+    $name: Win+Shift+R
+    $description: Snipping Tool record
   - DisableWinShiftS: false
     $name: Win+Shift+S
     $description: Snipping Tool screenshot
@@ -375,6 +378,7 @@ struct
     bool DisableWinCtrlO;
     bool DisableWinCtrlS;
     bool DisableWinSpace;
+    bool DisableWinShiftR;
     bool DisableWinShiftS;
     bool DisableWinAltK;
     bool DisableWinPeriod;
@@ -468,6 +472,7 @@ void LoadSettings()
     g_settings.DisableWinCtrlO = Wh_GetIntSetting(L"StandardShortcuts.DisableWinCtrlO");
     g_settings.DisableWinCtrlS = Wh_GetIntSetting(L"StandardShortcuts.DisableWinCtrlS");
     g_settings.DisableWinSpace = Wh_GetIntSetting(L"StandardShortcuts.DisableWinSpace");
+    g_settings.DisableWinShiftR = Wh_GetIntSetting(L"StandardShortcuts.DisableWinShiftR");
     g_settings.DisableWinShiftS = Wh_GetIntSetting(L"StandardShortcuts.DisableWinShiftS");
     g_settings.DisableWinAltK = Wh_GetIntSetting(L"StandardShortcuts.DisableWinAltK");
     g_settings.DisableWinPeriod = Wh_GetIntSetting(L"StandardShortcuts.DisableWinPeriod");
@@ -541,6 +546,7 @@ bool ShouldBlockHotkey(UINT fsModifiers, UINT vk)
             switch (vk)
             {
                 case 'M': block = g_settings.DisableWinShiftM; break;
+                case 'R': block = g_settings.DisableWinShiftR; break;
                 case 'S': block = g_settings.DisableWinShiftS; break;
                 case VK_LEFT: block = g_settings.DisableWinShiftLeft; break;
                 case VK_RIGHT: block = g_settings.DisableWinShiftRight; break;
