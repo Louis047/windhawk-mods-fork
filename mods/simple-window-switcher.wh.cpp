@@ -400,12 +400,28 @@ Additional improvements made by [Asteski](https://github.com/Asteski) and [bropi
           $options:
           - top: Above Thumbnail
           - bottom: Below Thumbnail
-        - showBadgeIconBackground: true
+        - badgeIconSize: medium
+          $name: Badge Icon Size
+          $description: Size of the icon overlay in Badge Layout.
+          $options:
+          - small: Small (16x16)
+          - medium: Medium (32x32 - Default)
+          - large: Large (40x40)
+          - xlarge: Extra Large (48x48)
+        - showBadgeIconBackground: auto
           $name: Show Badge Icon Background
-          $description: Draw a backdrop shape behind the badge icon. If off, a drop shadow is drawn instead.
-        - showBadgeIconBackgroundShadow: false
+          $description: Draw a backdrop shape behind the badge icon. Auto is disabled on Windows 11 (drawing soft drop shadows) and enabled on Windows 10.
+          $options:
+          - auto: Auto (Disabled on Windows 11, Enabled on Windows 10)
+          - true: Enabled
+          - false: Disabled
+        - showBadgeIconBackgroundShadow: auto
           $name: Show Badge Icon Background Shadow
-          $description: Draw a soft drop shadow under the badge icon background pill.
+          $description: Draw a soft drop shadow under the badge icon background pill. Auto is disabled on Windows 10.
+          $options:
+          - auto: Auto (Disabled on Windows 10, Enabled on Windows 11)
+          - true: Enabled
+          - false: Disabled
         - badgeIconPadding: 4
           $name: Badge Icon Padding (px)
           $description: Extra space between the icon and the edge of its background.
@@ -415,6 +431,9 @@ Additional improvements made by [Asteski](https://github.com/Asteski) and [bropi
         - badgeIconOffsetY: 0
           $name: Badge Icon Offset Y (px)
           $description: Nudge the icon vertically from its default position.
+        - badgeSwitcherPadding: 20
+          $name: Badge Layout Padding (px)
+          $description: Padding between the switcher window border and the window entries in pixels for Badge Layout (before DPI scaling). Default 20.
       $name: Badge Layout Settings
       $description: Configuration options applied when Switcher Layout is set to Badge Layout (macOS-style).
     - DockLayout:
@@ -457,6 +476,9 @@ Additional improvements made by [Asteski](https://github.com/Asteski) and [bropi
           - '9': 9 Icons
           - '11': 11 Icons
           - '0': Fit Screen Width
+        - dockSwitcherPadding: 11
+          $name: Dock Layout Padding (px)
+          $description: Padding between the switcher window border and dock elements in pixels for Dock Layout (before DPI scaling). Default 11.
       $name: Dock Layout Settings
       $description: Configuration options applied when Switcher Layout is set to Dock / Strip Layout.
     - Font:
@@ -522,8 +544,8 @@ Additional improvements made by [Asteski](https://github.com/Asteski) and [bropi
       $name: Shrink Tasks to Fit
       $description: Automatically shrink task tiles (thumbnails and icons) in discrete steps as the number of visible windows grows, so more tasks stay visible without being pushed off-screen. Your Row Height and Icon Size act as the maximum size.
     - switcherPadding: 20
-      $name: Switcher Window Padding (px)
-      $description: Padding between the switcher window border and the window entries in pixels (before DPI scaling). Default 20.
+      $name: Default Layout Padding (px)
+      $description: Padding between the switcher window border and the window entries in pixels for Default Layout (before DPI scaling). Default 20.
     - entryPadding: 16
       $name: Entry Inner Padding (px)
       $description: Padding between the task entry background (card border/fill) and its inner elements (thumbnail, icon, and title) in pixels (before DPI scaling). Default 16.
@@ -558,7 +580,7 @@ Additional improvements made by [Asteski](https://github.com/Asteski) and [bropi
 - Accessibility:
     - showDelay: 0
       $name: Show Delay (ms)
-      $description: Delay in milliseconds before showing the switcher (0 = instant).
+      $description: Delay in milliseconds before showing the switcher. Setting 0 (default) enables an automatic 75ms rapid-switch grace period that cleanly switches windows without flashing the UI during fast Alt+Tab taps.
     - scrollWheelBehavior: never
       $name: Scroll Wheel Activation
       $description: When the scroll wheel should be active.
@@ -773,6 +795,9 @@ struct Settings {
     bool autoFitTasks;
     int maxHeightPercent; int showDelay;
     int switcherPadding;
+    int defaultSwitcherPadding;
+    int badgeSwitcherPadding;
+    int dockSwitcherPadding;
     int entryPadding;
     bool perMonitorWindows; bool taskRoundedCorners; bool roundThumbnailCorners; bool roundGroupIndicator; bool roundBadgeIconBackground; bool reverseScrollDirection;
     bool centerTaskContent;
@@ -792,6 +817,7 @@ struct Settings {
     // Badge layout (macOS-style)
     WCHAR badgeIconPosition[32];
     WCHAR badgeTitlePosition[16];
+    WCHAR badgeIconSize[16];
     bool showBadgeIconBackground; bool showBadgeIconBackgroundShadow;
     int badgeIconPadding;
     int badgeIconOffsetX;
@@ -936,6 +962,7 @@ static void UpdateHoverFromCursor(bool allowAnimation = true);
 static void UpdateHoverAtPoint(HWND hWnd, int x, int y, bool allowAnimation = true);
 static void GetOverflowState(bool& hasPrev, bool& hasNext);
 static void UpdateChevronLayout(HWND hWnd);
+static void RestoreWindowIfIconic(HWND hWnd);
 static void UpdateChevronAnimationTargets(bool immediate = false);
 static int HitTestChevron(HWND hWnd, int x, int y);
 
@@ -1031,6 +1058,11 @@ static bool DockLayoutActive() {
 static bool BadgeLayoutActive() {
     return s_cachedSettings.badgeLayoutActive;
 }
+static inline int GetActiveSwitcherPadding() {
+    if (DockLayoutActive()) return g_settings.dockSwitcherPadding;
+    if (BadgeLayoutActive()) return g_settings.badgeSwitcherPadding;
+    return g_settings.defaultSwitcherPadding;
+}
 static bool HighlightHasFill() {
     return s_cachedSettings.highlightHasFill;
 }
@@ -1053,6 +1085,12 @@ static bool BadgeIconPositionIs(const WCHAR* v) { return wcscmp(g_settings.badge
 static bool BadgeTitleIsTop() { return wcscmp(g_settings.badgeTitlePosition, L"top") == 0; }
 static int GetHeaderIconSizeBase() {
     if (DockLayoutActive()) return g_settings.dockIconSize > 0 ? g_settings.dockIconSize : 48;
+    if (BadgeLayoutActive()) {
+        if (wcscmp(g_settings.badgeIconSize, L"small") == 0) return 16;
+        if (wcscmp(g_settings.badgeIconSize, L"large") == 0) return 40;
+        if (wcscmp(g_settings.badgeIconSize, L"xlarge") == 0) return 48;
+        return 32; // Default to Medium (32px) for Badge Layout
+    }
     if (IconSizeIs(L"xlarge")) return 64;
     if (IconSizeIs(L"large")) return 48;
     if (IconSizeIs(L"medium")) return 32;
@@ -2572,7 +2610,7 @@ static int GetHeaderTitleHeightPx() {
 }
 static int GetHeaderRowHeightPx() {
     if (DockLayoutActive()) {
-        return MulDiv(30, g_dpiY, 96);
+        return MulDiv(20, g_dpiY, 96);
     }
     if (!g_settings.showTitle && !g_settings.showIcon) {
         return 0;
@@ -3825,8 +3863,10 @@ static void UpdateDockThumbnailDwm() {
             }
         }
 
-        BYTE alpha = (BYTE)(g_animEntranceCurrentAlpha * 255.0f);
-        if (alpha == 0) alpha = 255;
+        float combinedAlpha = g_animEntranceCurrentAlpha * g_animExitCurrentAlpha;
+        if (combinedAlpha < 0.0f) combinedAlpha = 0.0f;
+        if (combinedAlpha > 1.0f) combinedAlpha = 1.0f;
+        BYTE alpha = (BYTE)roundf(combinedAlpha * 255.0f);
 
         RECT curDst = selWnd.rcThumbActual;
         if (g_dockPreviewSlide.active) {
@@ -3834,7 +3874,6 @@ static void UpdateDockThumbnailDwm() {
             curDst.left += offX;
             curDst.right += offX;
             alpha = (BYTE)roundf((float)alpha * g_dockPreviewSlide.currentAlpha);
-            if (alpha < 1) alpha = 1;
         }
 
         for (const auto& kv : selWnd.hThumbs) {
@@ -3845,7 +3884,7 @@ static void UpdateDockThumbnailDwm() {
             p.fSourceClientAreaOnly = FALSE;
             p.rcDestination = curDst;
             p.opacity = alpha;
-            p.fVisible = TRUE;
+            p.fVisible = (alpha > 0);
 
             bool needsCrop = (IsIconic(selWnd.hWnd) ||
                              (selWnd.rcSourceCrop.left != 0 || selWnd.rcSourceCrop.top != 0 ||
@@ -3901,8 +3940,8 @@ static void ComputeDockLayout(HMONITOR hMon, const MONITORINFO& mi, UINT dpiX, U
     int maxW = monW * g_settings.maxWidthPercent / 100;
     int maxH = monH * g_settings.maxHeightPercent / 100;
 
-    int masterPadX = DpiScale(g_settings.switcherPadding, dpiX);
-    int masterPadY = DpiScale(g_settings.switcherPadding, dpiY);
+    int masterPadX = DpiScale(g_settings.dockSwitcherPadding, dpiX);
+    int masterPadY = DpiScale(g_settings.dockSwitcherPadding, dpiY);
 
     int n = (int)g_windows.size();
     if (n == 0) {
@@ -3945,9 +3984,9 @@ static void ComputeDockLayout(HMONITOR hMon, const MONITORINFO& mi, UINT dpiX, U
     int prevH = 0;
     int previewSlotH = 0;
 
-    int titleH = GetHeaderRowHeightPx();
-    if (titleH < DpiScale(28, dpiY)) titleH = DpiScale(28, dpiY);
-    int divPad = DpiScale(6, dpiY);
+    int titleH = g_settings.showTitle ? GetHeaderRowHeightPx() : 0;
+    if (g_settings.showTitle && titleH < DpiScale(20, dpiY)) titleH = DpiScale(20, dpiY);
+    int divPad = DpiScale(8, dpiY);
 
     if (showPreview) {
         int maxPrevH = DpiScale(g_settings.dockPreviewHeight > 0 ? g_settings.dockPreviewHeight : 280, dpiY);
@@ -3971,57 +4010,91 @@ static void ComputeDockLayout(HMONITOR hMon, const MONITORINFO& mi, UINT dpiX, U
         previewSlotH = prevH + DpiScale(12, dpiY);
     }
 
-    int titleSpacing = showPreview ? DpiScale(4, dpiY) : 0;
-    int dividerSpace = 1 + divPad * 2; // Only 1 subtle divider between dock strip and content
-    int contentH = cellH + previewSlotH + titleH + dividerSpace + titleSpacing;
-    g_winH = contentH + 2 * masterPadY;
-
     int contentW = std::max(totalStripW, prevW + DpiScale(32, dpiX));
     int minW = DpiScale(380, dpiX);
     if (contentW < minW) contentW = minW;
     if (contentW > maxW - 2 * masterPadX) contentW = maxW - 2 * masterPadX;
     g_winW = contentW + 2 * masterPadX;
 
-    int curY = masterPadY;
+    int curY = 0;
     if (DockIconIsTop()) {
-        // 1. Icon Strip
+        curY = DpiScale(11, dpiY);
+        // 1. Icon Strip (11px from window top)
         g_rcDockIconStrip = { masterPadX, curY, g_winW - masterPadX, curY + cellH };
-        curY += cellH + divPad + 1 + divPad;
+        curY += cellH;
 
-        // 2. Central Preview
         if (showPreview) {
+            // Divider between icons and preview: 12px from icons, 1px divider, 8px to preview
+            curY += DpiScale(12, dpiY) + 1 + DpiScale(8, dpiY);
+            // 2. Central Preview
             g_rcCentralPreviewSlot = { masterPadX, curY, g_winW - masterPadX, curY + previewSlotH };
             int px = masterPadX + (g_winW - 2 * masterPadX - prevW) / 2;
             int py = curY + (previewSlotH - prevH) / 2;
             g_rcCentralPreview = { px, py, px + prevW, py + prevH };
-            curY += previewSlotH + titleSpacing;
+            curY += previewSlotH;
+
+            // 3. Title Bar
+            if (g_settings.showTitle) {
+                curY += DpiScale(8, dpiY);
+                g_rcDockTitleBar = { masterPadX, curY, g_winW - masterPadX, curY + titleH };
+                curY += titleH + DpiScale(15, dpiY);
+            } else {
+                g_rcDockTitleBar = { 0, 0, 0, 0 };
+                curY += DpiScale(11, dpiY);
+            }
+        } else if (g_settings.showTitle) {
+            g_rcCentralPreviewSlot = { 0, 0, 0, 0 };
+            g_rcCentralPreview = { 0, 0, 0, 0 };
+            // Divider between icons and title: 12px from icons, 1px divider, 15px to title text
+            curY += DpiScale(12, dpiY) + 1 + DpiScale(15, dpiY);
+            // 3. Title Bar (15px from divider, 15px to window bottom)
+            g_rcDockTitleBar = { masterPadX, curY, g_winW - masterPadX, curY + titleH };
+            curY += titleH + DpiScale(15, dpiY);
         } else {
             g_rcCentralPreviewSlot = { 0, 0, 0, 0 };
             g_rcCentralPreview = { 0, 0, 0, 0 };
+            g_rcDockTitleBar = { 0, 0, 0, 0 };
+            curY += DpiScale(11, dpiY);
         }
-
-        // 3. Title Bar
-        g_rcDockTitleBar = { masterPadX, curY, g_winW - masterPadX, curY + titleH };
+        g_winH = curY;
     } else {
-        // 1. Title Bar
-        g_rcDockTitleBar = { masterPadX, curY, g_winW - masterPadX, curY + titleH };
-        curY += titleH + titleSpacing;
+        if (g_settings.showTitle) {
+            curY = DpiScale(15, dpiY);
+            // 1. Title Bar (15px from window top)
+            g_rcDockTitleBar = { masterPadX, curY, g_winW - masterPadX, curY + titleH };
+            curY += titleH;
+        } else {
+            g_rcDockTitleBar = { 0, 0, 0, 0 };
+            curY = DpiScale(11, dpiY);
+        }
 
-        // 2. Central Preview
         if (showPreview) {
+            if (g_settings.showTitle) {
+                curY += DpiScale(8, dpiY);
+            }
+            // 2. Central Preview
             g_rcCentralPreviewSlot = { masterPadX, curY, g_winW - masterPadX, curY + previewSlotH };
             int px = masterPadX + (g_winW - 2 * masterPadX - prevW) / 2;
             int py = curY + (previewSlotH - prevH) / 2;
             g_rcCentralPreview = { px, py, px + prevW, py + prevH };
-            curY += previewSlotH + divPad + 1 + divPad;
+            curY += previewSlotH;
+
+            // Divider between preview and icons: 8px from preview, 1px divider, 12px to icons
+            curY += DpiScale(8, dpiY) + 1 + DpiScale(12, dpiY);
+        } else if (g_settings.showTitle) {
+            g_rcCentralPreviewSlot = { 0, 0, 0, 0 };
+            g_rcCentralPreview = { 0, 0, 0, 0 };
+            // Divider between title and icons: 15px from title text, 1px divider, 12px to icons
+            curY += DpiScale(15, dpiY) + 1 + DpiScale(12, dpiY);
         } else {
             g_rcCentralPreviewSlot = { 0, 0, 0, 0 };
             g_rcCentralPreview = { 0, 0, 0, 0 };
-            curY += divPad + 1 + divPad;
         }
 
-        // 3. Icon Strip
+        // 3. Icon Strip (11px to window bottom)
         g_rcDockIconStrip = { masterPadX, curY, g_winW - masterPadX, curY + cellH };
+        curY += cellH + DpiScale(11, dpiY);
+        g_winH = curY;
     }
 
     if (g_layoutStartIndex > n - visibleCount) {
@@ -4065,6 +4138,7 @@ static void ComputeLayout(HMONITOR hMon) {
     }
     g_dpiX = dpiX; g_dpiY = dpiY;
 
+    g_settings.switcherPadding = GetActiveSwitcherPadding();
     int n = (int)g_windows.size();
     if (n == 0) { g_winW = 0; g_winH = 0; return; }
 
@@ -5111,9 +5185,8 @@ static inline int GetHeaderTopForEntry(const WindowEntry& e) {
 static RECT GetCloseButtonRect(const RECT& rcCell, const RECT& rcThumbActual, const RECT& rcThumbSlot) {
     if (DockLayoutActive()) {
         int btnSz = DpiScale(16, g_dpiX);
-        int btnPadding = DpiScale(2, g_dpiX);
-        int bx = rcCell.right - btnSz - btnPadding;
-        int by = rcCell.top + btnPadding;
+        int bx = rcCell.right - btnSz - DpiScale(1, g_dpiX);
+        int by = rcCell.top + DpiScale(1, g_dpiY);
         return { bx, by, bx + btnSz, by + btnSz };
     }
 
@@ -5609,12 +5682,12 @@ static void DrawDockContentInner(HDC hdc, bool fillBg, HWND hWnd, bool includeSe
 
         int divX = masterPadX + DpiScale(12, g_dpiX);
         int divW = w - 2 * (masterPadX + DpiScale(12, g_dpiX));
-        if (divW > 0) {
+        if (divW > 0 && (showPreview || g_settings.showTitle)) {
             if (DockIconIsTop()) {
-                int divY = g_rcDockIconStrip.bottom + DpiScale(5, g_dpiY);
+                int divY = g_rcDockIconStrip.bottom + DpiScale(12, g_dpiY);
                 gfx.FillRectangle(&divBrush, divX, divY, divW, 1);
             } else {
-                int divY = g_rcDockIconStrip.top - DpiScale(6, g_dpiY);
+                int divY = g_rcDockIconStrip.top - DpiScale(12, g_dpiY) - 1;
                 gfx.FillRectangle(&divBrush, divX, divY, divW, 1);
             }
         }
@@ -5919,14 +5992,17 @@ static void DrawBadgeIconOverlay(HDC hdc, const RECT& rcThumbActual, HICON hIcon
         }
         DrawIconEx(hdc, bIconX, bIconY, hIcon, iconSz, iconSz, 0, NULL, DI_NORMAL);
     } else {
-        Gdiplus::Bitmap* pBmp = CreateIconShadowBitmap(hIcon, iconSz, iconSz, 0.08f);
-        if (pBmp) {
-            int dx[] = { 0, 1, 0, -1, 1 };
-            int dy[] = { 1, 0, -1, 0, 1 };
-            for (int p = 0; p < 5; ++p) {
-                gfx.DrawImage(pBmp, bIconX + DpiScale(dx[p], g_dpiX), bIconY + DpiScale(dy[p] + 2, g_dpiY), iconSz, iconSz);
+        bool drawShadow = IsWin11OrGreater() || g_settings.showThumbnailShadow;
+        if (drawShadow) {
+            Gdiplus::Bitmap* pBmp = CreateIconShadowBitmap(hIcon, iconSz, iconSz, 0.08f);
+            if (pBmp) {
+                int dx[] = { 0, 1, 0, -1, 1 };
+                int dy[] = { 1, 0, -1, 0, 1 };
+                for (int p = 0; p < 5; ++p) {
+                    gfx.DrawImage(pBmp, bIconX + DpiScale(dx[p], g_dpiX), bIconY + DpiScale(dy[p] + 2, g_dpiY), iconSz, iconSz);
+                }
+                delete pBmp;
             }
-            delete pBmp;
         }
         DrawIconEx(hdc, bIconX, bIconY, hIcon, iconSz, iconSz, 0, NULL, DI_NORMAL);
     }
@@ -6346,14 +6422,10 @@ static void DrawSwitcherOverlay(HDC hdc, HWND hWnd) {
     }
 
     if (g_settings.showSwitcherBorder) {
-        bool dwmDrawsBorder = IsWin11OrGreater() && (ThemeIs(L"mica") || g_nativeBackdropActive);
-
-        if (!dwmDrawsBorder) {
-            SelectClipRgn(hdc, NULL);
-            RECT wRc; GetClientRect(hWnd, &wRc);
-            int winRadius = GetWindowCornerRadiusPx();
-            DrawSwitcherOuterBorder(hdc, wRc.right, wRc.bottom, winRadius);
-        }
+        SelectClipRgn(hdc, NULL);
+        RECT wRc; GetClientRect(hWnd, &wRc);
+        int winRadius = GetWindowCornerRadiusPx();
+        DrawSwitcherOuterBorder(hdc, wRc.right, wRc.bottom, winRadius);
     }
 }
 
@@ -6671,6 +6743,10 @@ static void CancelPendingShow() {
         KillTimer(g_hSwitcher, SWS_ALT_POLL_TIMER_ID);
         DWMNCRENDERINGPOLICY enabled = DWMNCRP_ENABLED;
         DwmSetWindowAttribute(g_hSwitcher, DWMWA_NCRENDERING_POLICY, &enabled, sizeof(enabled));
+        if (IsWin11OrGreater()) {
+            COLORREF colorNone = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+            DwmSetWindowAttribute(g_hSwitcher, 34 /* DWMWA_BORDER_COLOR */, &colorNone, sizeof(colorNone));
+        }
     }
     if (s_hWinEventHook) {
         UnhookWinEvent(s_hWinEventHook);
@@ -6773,9 +6849,16 @@ static void RevealPendingSwitcher() {
     UpdateChevronLayout(g_hSwitcher);
     UpdateChevronAnimationTargets(true);
 
+    if (DockLayoutActive()) {
+        UpdateDockPreviewForSelection();
+    }
     RegisterThumbnails();
-    // Render initial frame 0 while window is hidden so no previous frame's border flashes
+    // Render initial frame 0 for BOTH switcher and overlay while windows are hidden
+    // so no stale borders, contours, or frames flash!
     PaintSwitcher();
+    if (g_hCloseBtnWnd) {
+        PaintSwitcherOverlay();
+    }
 
     if (g_hCloseBtnWnd) {
         ShowWindow(g_hCloseBtnWnd, SW_SHOWNA);
@@ -6788,7 +6871,10 @@ static void RevealPendingSwitcher() {
     } else {
         PaintSwitcher();
         UpdateWindow(g_hSwitcher);
-        if (g_hCloseBtnWnd) UpdateWindow(g_hCloseBtnWnd);
+        if (g_hCloseBtnWnd) {
+            PaintSwitcherOverlay();
+            UpdateWindow(g_hCloseBtnWnd);
+        }
     }
 
     if (!g_isSticky) {
@@ -6855,7 +6941,8 @@ static void ApplyThemeToWindow(HWND hWnd) {
         SetWindowLongPtrW(hWnd, GWL_EXSTYLE, exs | WS_EX_LAYERED);
         SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
     }
-    SetLayeredWindowAttributes(hWnd, 0, 255, LWA_ALPHA);
+    BYTE initAlpha = (AreAnimationsGloballyEnabled() && g_settings.enableEntranceAnimation) ? 0 : 255;
+    SetLayeredWindowAttributes(hWnd, 0, initAlpha, LWA_ALPHA);
 
     // Reset legacy accent policy by default
     if (g_SetWindowCompositionAttribute) {
@@ -6924,17 +7011,10 @@ static void ApplyThemeToWindow(HWND hWnd) {
     if (IsWin11OrGreater()) {
         INT cp = GetCornerPref();
         DwmSetWindowAttribute(hWnd, 33 /* DWMWA_WINDOW_CORNER_PREFERENCE */, &cp, sizeof(cp));
-        if (!g_settings.showSwitcherBorder) {
-            COLORREF none = 0xFFFFFFFE; // DWMWA_COLOR_NONE
-            DwmSetWindowAttribute(hWnd, 34 /* DWMWA_BORDER_COLOR */, &none, sizeof(none));
-        } else {
-            COLORREF dwmBorderColor = 0xFFFFFFFF; // DWMWA_COLOR_DEFAULT
-            const WCHAR* borderMode = g_isDarkMode ? g_settings.borderColorModeDark : g_settings.borderColorModeLight;
-            if (wcscmp(borderMode, L"accent") == 0 || wcscmp(borderMode, L"custom") == 0) {
-                dwmBorderColor = GetContourColor();
-            }
-            DwmSetWindowAttribute(hWnd, 34 /* DWMWA_BORDER_COLOR */, &dwmBorderColor, sizeof(dwmBorderColor));
-        }
+        // Always suppress DWM hardware borders. SWS renders its own anti-aliased,
+        // alpha-fadeable outer border inside the layered overlay window (g_hCloseBtnWnd).
+        COLORREF none = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+        DwmSetWindowAttribute(hWnd, 34 /* DWMWA_BORDER_COLOR */, &none, sizeof(none));
     }
 
     SetWindowPos(hWnd, NULL, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
@@ -7079,7 +7159,9 @@ static void ShowSwitcher(bool sticky) {
         );
     }
 
-    if (g_settings.showDelay > 0 && !sticky) {
+    constexpr int kRapidAltTabGraceThresholdMs = 75;
+    int effectiveDelay = !sticky ? ((g_settings.showDelay > 0) ? std::max(g_settings.showDelay, kRapidAltTabGraceThresholdMs) : kRapidAltTabGraceThresholdMs) : 0;
+    if (effectiveDelay > 0) {
         g_isPendingShow = true;
         g_isVisible = false;
 
@@ -7087,14 +7169,16 @@ static void ShowSwitcher(bool sticky) {
         LONG_PTR exStyle = GetWindowLongPtrW(g_hSwitcher, GWL_EXSTYLE);
         SetWindowLongPtrW(g_hSwitcher, GWL_EXSTYLE, exStyle | WS_EX_LAYERED);
 
-        // Suppress DWM frame/shadow so no visual artifact appears anywhere on screen
-        DWMNCRENDERINGPOLICY disabled = DWMNCRP_DISABLED;
-        DwmSetWindowAttribute(g_hSwitcher, DWMWA_NCRENDERING_POLICY, &disabled, sizeof(disabled));
+        // Suppress DWM hardware border so no visual artifact appears anywhere on screen
+        if (IsWin11OrGreater()) {
+            COLORREF colorNone = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+            DwmSetWindowAttribute(g_hSwitcher, 34 /* DWMWA_BORDER_COLOR */, &colorNone, sizeof(colorNone));
+        }
 
         // 100% transparent: zero pixels rendered
         SetLayeredWindowAttributes(g_hSwitcher, 0, 0, LWA_ALPHA);
 
-        // Position directly at target coordinates (no off-screen coordinate guessing)
+        // Position directly at target coordinates
         SetWindowPos(g_hSwitcher, HWND_TOPMOST, cx, cy, g_winW, g_winH, SWP_NOACTIVATE);
         ShowWindow(g_hSwitcher, SW_SHOWNA);
 
@@ -7102,8 +7186,12 @@ static void ShowSwitcher(bool sticky) {
         // (WM_KEYUP, GetAsyncKeyState) when invoked over elevated/Admin windows
         SetForegroundWindow(g_hSwitcher);
 
+        if (g_hCloseBtnWnd) {
+            ShowWindow(g_hCloseBtnWnd, SW_HIDE);
+        }
+
         SetTimer(g_hSwitcher, SWS_ALT_POLL_TIMER_ID, 50, NULL);
-        SetTimer(g_hSwitcher, SWS_SHOW_DELAY_TIMER_ID, g_settings.showDelay, NULL);
+        SetTimer(g_hSwitcher, SWS_SHOW_DELAY_TIMER_ID, effectiveDelay, NULL);
         return;
     }
 
@@ -7142,8 +7230,12 @@ static void ShowSwitcher(bool sticky) {
     UpdateChevronLayout(g_hSwitcher);
     UpdateChevronAnimationTargets(true);
     RegisterThumbnails();
-    // Render initial frame 0 while window is hidden so no previous frame's border flashes
+    // Render initial frame 0 for BOTH switcher and overlay while windows are hidden
+    // so no stale borders, contours, or frames flash!
     PaintSwitcher();
+    if (g_hCloseBtnWnd) {
+        PaintSwitcherOverlay();
+    }
 
     if (g_hCloseBtnWnd) {
         ShowWindow(g_hCloseBtnWnd, SW_SHOWNA);
@@ -7156,7 +7248,10 @@ static void ShowSwitcher(bool sticky) {
     } else {
         PaintSwitcher();
         UpdateWindow(g_hSwitcher);
-        if (g_hCloseBtnWnd) UpdateWindow(g_hCloseBtnWnd);
+        if (g_hCloseBtnWnd) {
+            PaintSwitcherOverlay();
+            UpdateWindow(g_hCloseBtnWnd);
+        }
     }
 
     if (!sticky) {
@@ -7182,12 +7277,17 @@ static void HideSwitcher() {
         ShowWindow(g_hCloseBtnWnd, SW_HIDE);
     }
     if (g_hSwitcher) {
+        SetLayeredWindowAttributes(g_hSwitcher, 0, 0, LWA_ALPHA);
         BLENDFUNCTION bf = { AC_SRC_OVER, 0, 0, AC_SRC_ALPHA };
         UpdateLayeredWindow(g_hSwitcher, NULL, NULL, NULL, NULL, NULL, 0, &bf, ULW_ALPHA);
         ShowWindow(g_hSwitcher, SW_HIDE);
         LONG_PTR exStyle = GetWindowLongPtrW(g_hSwitcher, GWL_EXSTYLE);
         if (exStyle & WS_EX_TRANSPARENT) {
             SetWindowLongPtrW(g_hSwitcher, GWL_EXSTYLE, exStyle & ~WS_EX_TRANSPARENT);
+        }
+        if (IsWin11OrGreater()) {
+            COLORREF colorNone = 0xFFFFFFFE; // DWMWA_COLOR_NONE
+            DwmSetWindowAttribute(g_hSwitcher, 34 /* DWMWA_BORDER_COLOR */, &colorNone, sizeof(colorNone));
         }
     }
 
@@ -7251,6 +7351,45 @@ static void RestoreWindowIfIconic(HWND hWnd) {
 static void StartExitAnimation(bool activateSelectedWindow) {
     if ((!g_isVisible && !g_isPendingShow) || g_animExitActive) return;
 
+    if (g_isPendingShow || g_animEntranceActive || !AreAnimationsGloballyEnabled()) {
+        // 1. Immediately zero alpha and hide windows so not a single pixel or border can flash
+        if (g_hSwitcher) {
+            SetLayeredWindowAttributes(g_hSwitcher, 0, 0, LWA_ALPHA);
+            ShowWindow(g_hSwitcher, SW_HIDE);
+        }
+        if (g_hCloseBtnWnd) {
+            BLENDFUNCTION bf = { AC_SRC_OVER, 0, 0, AC_SRC_ALPHA };
+            UpdateLayeredWindow(g_hCloseBtnWnd, NULL, NULL, NULL, NULL, NULL, 0, &bf, ULW_ALPHA);
+            ShowWindow(g_hCloseBtnWnd, SW_HIDE);
+        }
+        HideSwitcher();
+
+        // 2. NOW activate the target window - no non-client border can flash because
+        // g_hSwitcher is already 100% hidden and zero-alpha
+        if (activateSelectedWindow && g_selectedIndex >= 0 && g_selectedIndex < (int)g_windows.size()) {
+            HWND hT = g_windows[g_selectedIndex].hWnd;
+            std::vector<HWND> groupWindows;
+            if (g_settings.showApplications && g_settings.restoreAllWindows) {
+                groupWindows = g_windows[g_selectedIndex].groupWindows;
+            }
+            for (HWND hw : groupWindows) {
+                if (IsWindow(hw) && hw != hT && IsIconic(hw)) {
+                    ShowWindow(hw, SW_SHOWNOACTIVATE);
+                    if (IsIconic(hw)) ShowWindowAsync(hw, SW_SHOWNOACTIVATE);
+                }
+            }
+            if (IsWindow(hT)) {
+                HWND hP = GetLastActivePopup(hT);
+                HWND hF = IsWindowVisible(hP) ? hP : hT;
+                RestoreWindowIfIconic(hT);
+                if (hF != hT) RestoreWindowIfIconic(hF);
+                if (!SetForegroundWindow(hF)) SwitchToThisWindow(hF, TRUE);
+                UpdateMruWindow(hT);
+            }
+        }
+        return;
+    }
+
     if (activateSelectedWindow && g_selectedIndex >= 0 && g_selectedIndex < (int)g_windows.size()) {
         HWND hT = g_windows[g_selectedIndex].hWnd;
         std::vector<HWND> groupWindows;
@@ -7278,11 +7417,6 @@ static void StartExitAnimation(bool activateSelectedWindow) {
             if (!SetForegroundWindow(hF)) SwitchToThisWindow(hF, TRUE);
             UpdateMruWindow(hT);
         }
-    }
-
-    if (!AreAnimationsGloballyEnabled()) {
-        HideSwitcher();
-        return;
     }
 
     g_animExitActive = true;
@@ -8892,9 +9026,12 @@ static LRESULT CALLBACK SwitcherWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
     if (uMsg == WM_NCCALCSIZE && wParam == TRUE) {
         return 0; // Remove standard frame for WS_OVERLAPPED
     }
+    if (uMsg == WM_NCPAINT) {
+        return 0; // Suppress default non-client frame and border painting
+    }
     if (uMsg == WM_NCACTIVATE) {
-        // Force DWM to keep the active visual state (Mica/Backdrop) even when unfocused
-        return DefWindowProcW(hWnd, uMsg, TRUE, lParam);
+        // Prevent DefWindowProc from painting the active/inactive hardware window border
+        return TRUE;
     }
 
     if (uMsg == WM_TIMER) {
@@ -9213,7 +9350,7 @@ static LRESULT CALLBACK SwitcherWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
             StartExitAnimation(false);
             return 0;
         }
-        if (wParam == VK_RETURN && g_isVisible) { SwitchToSelected(); return 0; }
+        if (wParam == VK_RETURN && (g_isVisible || g_isPendingShow)) { SwitchToSelected(); return 0; }
         break;
     case WM_SYSKEYUP:
         if (g_isVisible && UseAltShiftBackward() && wParam == VK_TAB) {
@@ -9234,6 +9371,13 @@ static LRESULT CALLBACK SwitcherWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
         if (wParam == VK_ESCAPE && g_isPendingShow) {
             StartExitAnimation(false);
             return 0;
+        }
+        if (g_isPendingShow) {
+            if (wParam == VK_RETURN || wParam == VK_SPACE) {
+                SwitchToSelected();
+                return 0;
+            }
+            RevealPendingSwitcher();
         }
         if (g_isVisible) {
             // Ctrl tap: drill into / out of the selected application's windows.
@@ -9720,8 +9864,9 @@ static void LoadSettings() {
     if (g_settings.rowWidth < 0) g_settings.rowWidth = 0;
     g_settings.stretchThumbnailsToTaskWidth = Wh_GetIntSetting(L"Dimensions.stretchThumbnailsToTaskWidth");
     g_settings.autoFitTasks = Wh_GetIntSetting(L"Dimensions.autoFitTasks");
-    g_settings.switcherPadding = LoadIntSetting(L"Dimensions.switcherPadding", 20);
-    if (g_settings.switcherPadding < 0) g_settings.switcherPadding = 20;
+    g_settings.defaultSwitcherPadding = LoadIntSetting(L"Dimensions.defaultSwitcherPadding", LoadIntSetting(L"Dimensions.switcherPadding", 20));
+    if (g_settings.defaultSwitcherPadding < 0) g_settings.defaultSwitcherPadding = 20;
+    g_settings.switcherPadding = g_settings.defaultSwitcherPadding;
     g_settings.entryPadding = LoadIntSetting(L"Dimensions.entryPadding", 16);
     if (g_settings.entryPadding < 0) g_settings.entryPadding = 16;
     g_settings.showThumbnails = Wh_GetIntSetting(L"Appearance.Thumbnails.showThumbnails");
@@ -9805,11 +9950,20 @@ static void LoadSettings() {
         wcscmp(g_settings.badgeTitlePosition, L"bottom") != 0) {
         wcsncpy_s(g_settings.badgeTitlePosition, L"bottom", _TRUNCATE);
     }
-    g_settings.showBadgeIconBackground = Wh_GetIntSetting(L"Appearance.BadgeLayout.showBadgeIconBackground");
-    g_settings.showBadgeIconBackgroundShadow = Wh_GetIntSetting(L"Appearance.BadgeLayout.showBadgeIconBackgroundShadow");
+    LoadStringSetting(L"Appearance.BadgeLayout.badgeIconSize", g_settings.badgeIconSize, L"medium");
+    if (wcscmp(g_settings.badgeIconSize, L"small") != 0 &&
+        wcscmp(g_settings.badgeIconSize, L"medium") != 0 &&
+        wcscmp(g_settings.badgeIconSize, L"large") != 0 &&
+        wcscmp(g_settings.badgeIconSize, L"xlarge") != 0) {
+        wcsncpy_s(g_settings.badgeIconSize, L"medium", _TRUNCATE);
+    }
+    g_settings.showBadgeIconBackground = LoadAutoBoolSetting(L"Appearance.BadgeLayout.showBadgeIconBackground", !IsWin11OrGreater());
+    g_settings.showBadgeIconBackgroundShadow = LoadAutoBoolSetting(L"Appearance.BadgeLayout.showBadgeIconBackgroundShadow", IsWin11OrGreater());
     g_settings.badgeIconPadding = Wh_GetIntSetting(L"Appearance.BadgeLayout.badgeIconPadding");
     g_settings.badgeIconOffsetX = Wh_GetIntSetting(L"Appearance.BadgeLayout.badgeIconOffsetX");
     g_settings.badgeIconOffsetY = Wh_GetIntSetting(L"Appearance.BadgeLayout.badgeIconOffsetY");
+    g_settings.badgeSwitcherPadding = LoadIntSetting(L"Appearance.BadgeLayout.badgeSwitcherPadding", LoadIntSetting(L"Dimensions.switcherPadding", 20));
+    if (g_settings.badgeSwitcherPadding < 0) g_settings.badgeSwitcherPadding = 20;
 
     // Dock layout settings
     LoadStringSetting(L"Appearance.DockLayout.dockIconPosition", g_settings.dockIconPosition, L"top");
@@ -9844,6 +9998,8 @@ static void LoadSettings() {
         g_settings.dockMaxVisibleIcons = Wh_GetIntSetting(L"Appearance.DockLayout.dockMaxVisibleIcons");
     }
     if (g_settings.dockMaxVisibleIcons < 0) g_settings.dockMaxVisibleIcons = 7;
+    g_settings.dockSwitcherPadding = LoadIntSetting(L"Appearance.DockLayout.dockSwitcherPadding", 11);
+    if (g_settings.dockSwitcherPadding < 0) g_settings.dockSwitcherPadding = 11;
 
     // Grouped indicator
     g_settings.showGroupIndicator = Wh_GetIntSetting(L"Grouping.showGroupIndicator");
@@ -10008,6 +10164,7 @@ static void LoadSettings() {
         if (endOfArray) break;
     }
     UpdateCachedSettings();
+    g_settings.switcherPadding = GetActiveSwitcherPadding();
     InvalidateStaticCache();
 }
 
