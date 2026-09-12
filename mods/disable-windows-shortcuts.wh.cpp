@@ -18,14 +18,15 @@ Selectively disable Windows keyboard shortcuts with individual toggles for each 
 - Individual toggle for each shortcut
 - Uses a lightweight background hook thread ensuring third-party modifiers (like AltSnap, GlazeWM) are completely unaffected.
 
-## How Shortcuts Are Handled
-This mod provides three organized categories of shortcuts:
-1. **Special Shortcuts (Flyouts):** Windows processes system flyouts (`Win+A`, `Win+N`, `Win+C`, `Win+K`, `Win+P`, `Win+U`, `Win+/`) at a lower compositor level. The mod physically suppresses keypresses via a low-level keyboard hook running in `dwm.exe`. Injected/simulated keystrokes (e.g. custom taskbars like YASB or macros) and native taskbar tray mouse clicks continue to work seamlessly.
-2. **Direct Shortcuts (No Restart Required):** Handled immediately via low-level keyboard hook in `dwm.exe`. Disabling shortcuts like `Win` or `Alt+Shift` allows third-party apps (such as Flow Launcher's Windows key launcher or custom `Alt+Shift` keybinds) to be used without Windows opening the Start Menu or switching keyboard layouts. Hardcoded shortcuts (`Ctrl+Esc`, `Win+Tab`, `Win+Arrows`, `Win+Space`, `Win+Ctrl+Shift+Alt`, `Win+Ctrl+Shift+B`) are blocked immediately without requiring an Explorer restart.
-3. **Standard Shortcuts (Requires Explorer Restart):** Handled via Explorer's `RegisterHotKey` API. When disabled, Explorer is prevented from claiming the key, freeing it in the OS kernel so other applications (such as PowerToys, GlazeWM, or Flow Launcher) can bind to it. Changes require an Explorer restart to release the key (a restart dialog will prompt you automatically).
+## Special Shortcuts
+A small number of system shortcuts (`Win+A`, `Win+C`, `Win+K`, `Win+N`, `Win+P`, `Win+U`, `Win+/`) open flyout panels and are not registered via the standard `RegisterHotKey` API.
+The mod provides **three options** for each of these:
+- **Off:** The shortcut is completely unaffected.
+- **Disable hotkey:** Blocks the shortcut natively by intercepting it in Explorer. Lightweight and does **not** require `dwm.exe`. Note: third-party apps that simulate these keys (e.g. some custom taskbars) will also be blocked.
+- **Block hotkey:** Physically suppresses the keystroke via a low-level hook running in `dwm.exe`, while letting Windows believe the key was registered. Third-party tools that simulate the shortcut continue to work. Requires `dwm.exe` in the inclusion list.
 
 ## ⚠️ Important `dwm.exe` Installation Step ⚠️
-For **Special Shortcuts** and **Direct Shortcuts** to be blocked, you **must** allow Windhawk to inject into the Desktop Window Manager (`dwm.exe`):
+Required only if you use the **"Block hotkey"** option on Special Shortcuts, or if you disable `Win+Tab`, window snapping (`Win+Arrows`), `Win+Space`, `Alt+Shift`, `Win` (Start Menu), or `Ctrl+Esc`:
 1. Open Windhawk and go to **Settings**
 2. Click on **Advanced settings** at the bottom
 3. Under **Process inclusion list**, ensure `dwm.exe` is added (or `*` is used to include all processes)
@@ -34,8 +35,8 @@ For **Special Shortcuts** and **Direct Shortcuts** to be blocked, you **must** a
 *Note: Changes to standard shortcuts (like Win+E) require an Explorer restart to completely release the hotkeys for other applications. You will be prompted automatically. If you completely disable or remove this mod from Windhawk, you must restart Explorer to restore those standard shortcuts.*
 
 ## Changes in 1.3.0
-- Reorganized shortcuts into three distinct sections: **Special Shortcuts**, **Direct Shortcuts**, and **Standard Shortcuts**.
-- If upgrading from version 1.2.1 or earlier, please review and re-apply your settings as configuration keys were restructured.
+- Added new shortcuts: `Win+Shift+C`, `Win+Shift+R`, `Win+Shift+Up/Down/Left/Right`, `Win+Ctrl+Shift+B`, Office hotkeys (`Win+Ctrl+Shift+Alt`), and more.
+- If upgrading from version 1.2.1 or earlier, your existing Special Shortcuts settings are preserved. Other settings remain unchanged.
 
 ## Notes
 - Win+L (Lock PC) cannot be blocked through standard hooks
@@ -44,80 +45,104 @@ For **Special Shortcuts** and **Direct Shortcuts** to be blocked, you **must** a
 // ==WindhawkModSettings==
 /*
 - SpecialShortcuts:
-  - DisableWinA: false
+  - DisableWinA: "off"
     $name: Win+A
     $description: Action Center / Quick Settings
-  - DisableWinC: false
+    $options:
+    - "off": Off
+    - disable: Disable hotkey (lightweight, simulating apps affected)
+    - block: Block hotkey (requires dwm.exe, simulating apps work)
+  - DisableWinC: "off"
     $name: Win+C
     $description: Cortana / Copilot
-  - DisableWinK: false
+    $options:
+    - "off": Off
+    - disable: Disable hotkey (lightweight, simulating apps affected)
+    - block: Block hotkey (requires dwm.exe, simulating apps work)
+  - DisableWinK: "off"
     $name: Win+K
     $description: Connect / Cast
-  - DisableWinN: false
+    $options:
+    - "off": Off
+    - disable: Disable hotkey (lightweight, simulating apps affected)
+    - block: Block hotkey (requires dwm.exe, simulating apps work)
+  - DisableWinN: "off"
     $name: Win+N
     $description: Notification Center
-  - DisableWinP: false
+    $options:
+    - "off": Off
+    - disable: Disable hotkey (lightweight, simulating apps affected)
+    - block: Block hotkey (requires dwm.exe, simulating apps work)
+  - DisableWinP: "off"
     $name: Win+P
     $description: Project / Display mode
-  - DisableWinU: false
+    $options:
+    - "off": Off
+    - disable: Disable hotkey (lightweight, simulating apps affected)
+    - block: Block hotkey (requires dwm.exe, simulating apps work)
+  - DisableWinU: "off"
     $name: Win+U
     $description: Accessibility Settings
-  - DisableWinSlash: false
+    $options:
+    - "off": Off
+    - disable: Disable hotkey (lightweight, simulating apps affected)
+    - block: Block hotkey (requires dwm.exe, simulating apps work)
+  - DisableWinSlash: "off"
     $name: Win+/
     $description: IME reconversion
+    $options:
+    - "off": Off
+    - disable: Disable hotkey (lightweight, simulating apps affected)
+    - block: Block hotkey (requires dwm.exe, simulating apps work)
   $name: Special Shortcuts
-  $description: System flyouts handled via DWM low-level hook. Requires dwm.exe in Process inclusion list.
-
-- DirectShortcuts:
-  - DisableWinKey: false
-    $name: Win
-    $description: Open Start Menu
-  - DisableCtrlEsc: false
-    $name: Ctrl+Esc
-    $description: Open Start Menu
-  - DisableAltShift: false
-    $name: Alt+Shift
-    $description: Switch keyboard layout
-  - DisableWinSpace: false
-    $name: Win+Space
-    $description: Switch keyboard layout
-  - DisableOfficeHotkeys: false
-    $name: Win+Ctrl+Shift+Alt
-    $description: Office Hub / Microsoft 365 app combinations
-  - DisableWinTab: false
-    $name: Win+Tab
-    $description: Task View
-  - DisableWinUp: false
-    $name: Win+Up
-    $description: Maximize window
-  - DisableWinDown: false
-    $name: Win+Down
-    $description: Restore/Minimize window
-  - DisableWinLeft: false
-    $name: Win+Left
-    $description: Snap window left
-  - DisableWinRight: false
-    $name: Win+Right
-    $description: Snap window right
-  - DisableWinShiftUp: false
-    $name: Win+Shift+Up
-    $description: Stretch window vertically
-  - DisableWinShiftDown: false
-    $name: Win+Shift+Down
-    $description: Restore/minimize height
-  - DisableWinShiftLeft: false
-    $name: Win+Shift+Left
-    $description: Move window to left monitor
-  - DisableWinShiftRight: false
-    $name: Win+Shift+Right
-    $description: Move window to right monitor
-  - DisableWinCtrlShiftB: false
-    $name: Win+Ctrl+Shift+B
-    $description: Restart graphics driver
-  $name: Direct Shortcuts
-  $description: Shortcuts handled immediately via low-level hook without requiring an Explorer restart. Requires dwm.exe in Process inclusion list.
+  $description: "Flyout shortcuts. 'Disable hotkey' is lightweight and works without dwm.exe. 'Block hotkey' requires dwm.exe but keeps simulating apps (e.g. custom taskbars) working."
 
 - StandardShortcuts:
+  - DisableWinKey: false
+    $name: Win
+    $description: Open Start Menu (requires dwm.exe)
+  - DisableCtrlEsc: false
+    $name: Ctrl+Esc
+    $description: Open Start Menu (requires dwm.exe)
+  - DisableAltShift: false
+    $name: Alt+Shift
+    $description: Switch keyboard layout (requires dwm.exe)
+  - DisableWinSpace: false
+    $name: Win+Space
+    $description: Switch keyboard layout (requires dwm.exe)
+  - DisableOfficeHotkeys: false
+    $name: Win+Ctrl+Shift+Alt
+    $description: Office Hub / Microsoft 365 app combinations (requires dwm.exe)
+  - DisableWinTab: false
+    $name: Win+Tab
+    $description: Task View (requires dwm.exe)
+  - DisableWinUp: false
+    $name: Win+Up
+    $description: Maximize window (requires dwm.exe)
+  - DisableWinDown: false
+    $name: Win+Down
+    $description: Restore/Minimize window (requires dwm.exe)
+  - DisableWinLeft: false
+    $name: Win+Left
+    $description: Snap window left (requires dwm.exe)
+  - DisableWinRight: false
+    $name: Win+Right
+    $description: Snap window right (requires dwm.exe)
+  - DisableWinShiftUp: false
+    $name: Win+Shift+Up
+    $description: Stretch window vertically (requires dwm.exe)
+  - DisableWinShiftDown: false
+    $name: Win+Shift+Down
+    $description: Restore/minimize height (requires dwm.exe)
+  - DisableWinShiftLeft: false
+    $name: Win+Shift+Left
+    $description: Move window to left monitor (requires dwm.exe)
+  - DisableWinShiftRight: false
+    $name: Win+Shift+Right
+    $description: Move window to right monitor (requires dwm.exe)
+  - DisableWinCtrlShiftB: false
+    $name: Win+Ctrl+Shift+B
+    $description: Restart graphics driver (requires dwm.exe)
   - DisableWinB: false
     $name: Win+B
     $description: Focus system tray
@@ -287,7 +312,7 @@ For **Special Shortcuts** and **Direct Shortcuts** to be blocked, you **must** a
     $name: Win+Ctrl+Q
     $description: Quick Assist
   $name: Standard Shortcuts
-  $description: Regular shortcuts registered by Explorer. Requires restarting Explorer to apply changes and release hotkeys for third-party apps.
+  $description: Regular shortcuts registered by Explorer or handled via low-level hook. Explorer-registered shortcuts require restarting Explorer to release for third-party apps. Shortcuts marked "(requires dwm.exe)" are handled via low-level hook.
 */
 // ==/WindhawkModSettings==
 
@@ -301,9 +326,16 @@ bool g_isDWM = false;
 // Settings structure
 struct Settings
 {
-    bool DisableWinA;
+    // Special Shortcuts (0=off, 1=disable via RegisterHotKey block, 2=block via DWM hook)
+    int DisableWinA;
+    int DisableWinC;
+    int DisableWinK;
+    int DisableWinN;
+    int DisableWinP;
+    int DisableWinU;
+    int DisableWinSlash;
+    // Standard/DWM-hook shortcuts (bool)
     bool DisableWinB;
-    bool DisableWinC;
     bool DisableWinD;
     bool DisableWinE;
     bool DisableWinF;
@@ -312,22 +344,17 @@ struct Settings
     bool DisableWinH;
     bool DisableWinI;
     bool DisableWinJ;
-    bool DisableWinK;
     bool DisableWinM;
-    bool DisableWinN;
     bool DisableWinO;
-    bool DisableWinP;
     bool DisableWinQ;
     bool DisableWinR;
     bool DisableWinS;
     bool DisableWinT;
-    bool DisableWinU;
     bool DisableWinV;
     bool DisableWinW;
     bool DisableWinX;
     bool DisableWinY;
     bool DisableWinZ;
-    bool DisableWinSlash;
     bool DisableWinTab;
     bool DisableWinUp;
     bool DisableWinDown;
@@ -381,9 +408,38 @@ struct Settings
     bool DisableCtrlEsc;
 } g_settings;
 
+// Reads a string setting that can be "off"/"false" (0), "disable"/"true" (1), or "block" (2).
+// Falls back to numeric parse for legacy stored integers.
+int GetSettingIntSafe(PCWSTR settingName)
+{
+    PCWSTR val = Wh_GetStringSetting(settingName);
+    if (!val) return 0;
+    int res = 0;
+    if (wcscmp(val, L"true") == 0 || wcscmp(val, L"disable") == 0) res = 1;
+    else if (wcscmp(val, L"false") == 0 || wcscmp(val, L"off") == 0) res = 0;
+    else if (wcscmp(val, L"block") == 0) res = 2;
+    else res = _wtoi(val); // fallback for legacy stored numbers
+    Wh_FreeStringSetting(val);
+    return res;
+}
+
+// Returns true if the settings differ in ways that require an Explorer restart.
+// Includes: Standard Shortcuts (RegisterHotKey-based) AND Special Shortcuts at tier 1
+// (which also block via RegisterHotKey, so Explorer must restart to release them).
+// Does NOT include DWM-hook-only shortcuts (Win+Tab, arrows, Win key, etc.) because
+// those are handled purely in dwm.exe and do not affect Explorer's registered hotkeys.
 bool StandardShortcutsEqual(const Settings& a, const Settings& b)
 {
-    return a.DisableWinB == b.DisableWinB &&
+    // Special shortcuts at tier 1 also block via RegisterHotKey — count as "standard" for restart purposes
+    auto specialTier1Equal = [](int x, int y) { return (x == 1) == (y == 1); };
+    return specialTier1Equal(a.DisableWinA, b.DisableWinA) &&
+           specialTier1Equal(a.DisableWinC, b.DisableWinC) &&
+           specialTier1Equal(a.DisableWinK, b.DisableWinK) &&
+           specialTier1Equal(a.DisableWinN, b.DisableWinN) &&
+           specialTier1Equal(a.DisableWinP, b.DisableWinP) &&
+           specialTier1Equal(a.DisableWinU, b.DisableWinU) &&
+           specialTier1Equal(a.DisableWinSlash, b.DisableWinSlash) &&
+           a.DisableWinB == b.DisableWinB &&
            a.DisableWinD == b.DisableWinD &&
            a.DisableWinE == b.DisableWinE &&
            a.DisableWinF == b.DisableWinF &&
@@ -449,33 +505,33 @@ bool HasAnyStandardShortcutsDisabled()
 
 void LoadSettings()
 {
-    // Special Shortcuts (Flyouts handled via DWM)
-    g_settings.DisableWinA = Wh_GetIntSetting(L"SpecialShortcuts.DisableWinA");
-    g_settings.DisableWinC = Wh_GetIntSetting(L"SpecialShortcuts.DisableWinC");
-    g_settings.DisableWinK = Wh_GetIntSetting(L"SpecialShortcuts.DisableWinK");
-    g_settings.DisableWinN = Wh_GetIntSetting(L"SpecialShortcuts.DisableWinN");
-    g_settings.DisableWinP = Wh_GetIntSetting(L"SpecialShortcuts.DisableWinP");
-    g_settings.DisableWinU = Wh_GetIntSetting(L"SpecialShortcuts.DisableWinU");
-    g_settings.DisableWinSlash = Wh_GetIntSetting(L"SpecialShortcuts.DisableWinSlash");
+    // Special Shortcuts: 3-tier string option ("off"=0, "disable"=1, "block"=2)
+    g_settings.DisableWinA = GetSettingIntSafe(L"SpecialShortcuts.DisableWinA");
+    g_settings.DisableWinC = GetSettingIntSafe(L"SpecialShortcuts.DisableWinC");
+    g_settings.DisableWinK = GetSettingIntSafe(L"SpecialShortcuts.DisableWinK");
+    g_settings.DisableWinN = GetSettingIntSafe(L"SpecialShortcuts.DisableWinN");
+    g_settings.DisableWinP = GetSettingIntSafe(L"SpecialShortcuts.DisableWinP");
+    g_settings.DisableWinU = GetSettingIntSafe(L"SpecialShortcuts.DisableWinU");
+    g_settings.DisableWinSlash = GetSettingIntSafe(L"SpecialShortcuts.DisableWinSlash");
 
-    // Direct Shortcuts (No Explorer Restart Required)
-    g_settings.DisableWinKey = Wh_GetIntSetting(L"DirectShortcuts.DisableWinKey");
-    g_settings.DisableCtrlEsc = Wh_GetIntSetting(L"DirectShortcuts.DisableCtrlEsc");
-    g_settings.DisableAltShift = Wh_GetIntSetting(L"DirectShortcuts.DisableAltShift");
-    g_settings.DisableWinSpace = Wh_GetIntSetting(L"DirectShortcuts.DisableWinSpace");
-    g_settings.DisableOfficeHotkeys = Wh_GetIntSetting(L"DirectShortcuts.DisableOfficeHotkeys");
-    g_settings.DisableWinTab = Wh_GetIntSetting(L"DirectShortcuts.DisableWinTab");
-    g_settings.DisableWinUp = Wh_GetIntSetting(L"DirectShortcuts.DisableWinUp");
-    g_settings.DisableWinDown = Wh_GetIntSetting(L"DirectShortcuts.DisableWinDown");
-    g_settings.DisableWinLeft = Wh_GetIntSetting(L"DirectShortcuts.DisableWinLeft");
-    g_settings.DisableWinRight = Wh_GetIntSetting(L"DirectShortcuts.DisableWinRight");
-    g_settings.DisableWinShiftUp = Wh_GetIntSetting(L"DirectShortcuts.DisableWinShiftUp");
-    g_settings.DisableWinShiftDown = Wh_GetIntSetting(L"DirectShortcuts.DisableWinShiftDown");
-    g_settings.DisableWinShiftLeft = Wh_GetIntSetting(L"DirectShortcuts.DisableWinShiftLeft");
-    g_settings.DisableWinShiftRight = Wh_GetIntSetting(L"DirectShortcuts.DisableWinShiftRight");
-    g_settings.DisableWinCtrlShiftB = Wh_GetIntSetting(L"DirectShortcuts.DisableWinCtrlShiftB");
+    // DWM-hook-only shortcuts (booleans, no Explorer restart needed)
+    g_settings.DisableWinKey = Wh_GetIntSetting(L"StandardShortcuts.DisableWinKey");
+    g_settings.DisableCtrlEsc = Wh_GetIntSetting(L"StandardShortcuts.DisableCtrlEsc");
+    g_settings.DisableAltShift = Wh_GetIntSetting(L"StandardShortcuts.DisableAltShift");
+    g_settings.DisableWinSpace = Wh_GetIntSetting(L"StandardShortcuts.DisableWinSpace");
+    g_settings.DisableOfficeHotkeys = Wh_GetIntSetting(L"StandardShortcuts.DisableOfficeHotkeys");
+    g_settings.DisableWinTab = Wh_GetIntSetting(L"StandardShortcuts.DisableWinTab");
+    g_settings.DisableWinUp = Wh_GetIntSetting(L"StandardShortcuts.DisableWinUp");
+    g_settings.DisableWinDown = Wh_GetIntSetting(L"StandardShortcuts.DisableWinDown");
+    g_settings.DisableWinLeft = Wh_GetIntSetting(L"StandardShortcuts.DisableWinLeft");
+    g_settings.DisableWinRight = Wh_GetIntSetting(L"StandardShortcuts.DisableWinRight");
+    g_settings.DisableWinShiftUp = Wh_GetIntSetting(L"StandardShortcuts.DisableWinShiftUp");
+    g_settings.DisableWinShiftDown = Wh_GetIntSetting(L"StandardShortcuts.DisableWinShiftDown");
+    g_settings.DisableWinShiftLeft = Wh_GetIntSetting(L"StandardShortcuts.DisableWinShiftLeft");
+    g_settings.DisableWinShiftRight = Wh_GetIntSetting(L"StandardShortcuts.DisableWinShiftRight");
+    g_settings.DisableWinCtrlShiftB = Wh_GetIntSetting(L"StandardShortcuts.DisableWinCtrlShiftB");
 
-    // Standard Shortcuts (Requires Explorer Restart)
+    // Standard Shortcuts (Explorer RegisterHotKey — require Explorer restart)
     g_settings.DisableWinB = Wh_GetIntSetting(L"StandardShortcuts.DisableWinB");
     g_settings.DisableWinD = Wh_GetIntSetting(L"StandardShortcuts.DisableWinD");
     g_settings.DisableWinE = Wh_GetIntSetting(L"StandardShortcuts.DisableWinE");
@@ -633,9 +689,9 @@ bool ShouldBlockHotkey(UINT fsModifiers, UINT vk)
         {
             switch (vk)
             {
-                case 'A': block = g_settings.DisableWinA; break;
+                case 'A': block = (g_settings.DisableWinA > 0); break;
                 case 'B': block = g_settings.DisableWinB; break;
-                case 'C': block = g_settings.DisableWinC; break;
+                case 'C': block = (g_settings.DisableWinC > 0); break;
                 case 'D': block = g_settings.DisableWinD; break;
                 case 'E': block = g_settings.DisableWinE; break;
                 case 'F': block = g_settings.DisableWinF; break;
@@ -644,16 +700,16 @@ bool ShouldBlockHotkey(UINT fsModifiers, UINT vk)
                 case 'H': block = g_settings.DisableWinH; break;
                 case 'I': block = g_settings.DisableWinI; break;
                 case 'J': block = g_settings.DisableWinJ; break;
-                case 'K': block = g_settings.DisableWinK; break;
+                case 'K': block = (g_settings.DisableWinK > 0); break;
                 case 'M': block = g_settings.DisableWinM; break;
-                case 'N': block = g_settings.DisableWinN; break;
+                case 'N': block = (g_settings.DisableWinN > 0); break;
                 case 'O': block = g_settings.DisableWinO; break;
-                case 'P': block = g_settings.DisableWinP; break;
+                case 'P': block = (g_settings.DisableWinP > 0); break;
                 case 'Q': block = g_settings.DisableWinQ; break;
                 case 'R': block = g_settings.DisableWinR; break;
                 case 'S': block = g_settings.DisableWinS; break;
                 case 'T': block = g_settings.DisableWinT; break;
-                case 'U': block = g_settings.DisableWinU; break;
+                case 'U': block = (g_settings.DisableWinU > 0); break;
                 case 'V': block = g_settings.DisableWinV; break;
                 case 'W': block = g_settings.DisableWinW; break;
                 case 'X': block = g_settings.DisableWinX; break;
@@ -674,7 +730,7 @@ bool ShouldBlockHotkey(UINT fsModifiers, UINT vk)
                 case VK_ESCAPE: block = g_settings.DisableWinEsc; break;
                 case VK_SPACE: block = g_settings.DisableWinSpace; break;
                 case VK_OEM_PERIOD: block = g_settings.DisableWinPeriod; break;
-                case VK_OEM_2: block = g_settings.DisableWinSlash; break;
+                case VK_OEM_2: block = (g_settings.DisableWinSlash > 0); break;
                 case VK_OEM_1: block = g_settings.DisableWinSemicolon; break;
                 case VK_SNAPSHOT: block = g_settings.DisableWinPrtSc; break;
             }
@@ -703,16 +759,19 @@ bool IsKnownHardcodedHotkey(UINT fsModifiers, UINT vk)
     if (hasWin && !hasCtrl && !hasAlt)
     {
         if (!hasShift) {
-            // Hardcoded keys that bypass RegisterHotKey
+            // DWM-hook-only hardcoded keys: always pass through RegisterHotKey
             if (vk == VK_TAB || vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_SPACE)
                 return true;
-            if (vk == 'A' && g_settings.DisableWinA) return true;
-            if (vk == 'C' && g_settings.DisableWinC) return true;
-            if (vk == 'K' && g_settings.DisableWinK) return true;
-            if (vk == 'N' && g_settings.DisableWinN) return true;
-            if (vk == 'P' && g_settings.DisableWinP) return true;
-            if (vk == 'U' && g_settings.DisableWinU) return true;
-            if (vk == VK_OEM_2 && g_settings.DisableWinSlash) return true;
+            // Special shortcuts at tier 2 ("block"): let Explorer register so flyouts initialize,
+            // physical key is suppressed in DWM hook. At tier 1 ("disable"), return false so
+            // Explorer is blocked from registering — freeing the key at OS level.
+            if (vk == 'A' && g_settings.DisableWinA == 2) return true;
+            if (vk == 'C' && g_settings.DisableWinC == 2) return true;
+            if (vk == 'K' && g_settings.DisableWinK == 2) return true;
+            if (vk == 'N' && g_settings.DisableWinN == 2) return true;
+            if (vk == 'P' && g_settings.DisableWinP == 2) return true;
+            if (vk == 'U' && g_settings.DisableWinU == 2) return true;
+            if (vk == VK_OEM_2 && g_settings.DisableWinSlash == 2) return true;
         } else {
             // Win+Shift+Arrows
             if (vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT)
@@ -1144,17 +1203,19 @@ void StopHookThread()
 
 bool NeedsDwmHook()
 {
-    return g_settings.DisableWinA || g_settings.DisableWinC || 
-           g_settings.DisableWinK || g_settings.DisableWinN || 
-           g_settings.DisableWinP || g_settings.DisableWinU || 
-           g_settings.DisableWinSlash || 
+    // Special shortcuts need the DWM hook only at tier 2 ("block").
+    // At tier 1 ("disable"), they are handled entirely via RegisterHotKey_Hook (no DWM required).
+    return (g_settings.DisableWinA == 2) || (g_settings.DisableWinC == 2) ||
+           (g_settings.DisableWinK == 2) || (g_settings.DisableWinN == 2) ||
+           (g_settings.DisableWinP == 2) || (g_settings.DisableWinU == 2) ||
+           (g_settings.DisableWinSlash == 2) ||
            g_settings.DisableWinTab ||
-           g_settings.DisableWinUp || g_settings.DisableWinDown || 
+           g_settings.DisableWinUp || g_settings.DisableWinDown ||
            g_settings.DisableWinLeft || g_settings.DisableWinRight ||
-           g_settings.DisableWinShiftUp || g_settings.DisableWinShiftDown || 
+           g_settings.DisableWinShiftUp || g_settings.DisableWinShiftDown ||
            g_settings.DisableWinShiftLeft || g_settings.DisableWinShiftRight ||
            g_settings.DisableWinCtrlShiftB || g_settings.DisableOfficeHotkeys ||
-           g_settings.DisableWinSpace || g_settings.DisableAltShift || 
+           g_settings.DisableWinSpace || g_settings.DisableAltShift ||
            g_settings.DisableWinKey || g_settings.DisableCtrlEsc;
 }
 
