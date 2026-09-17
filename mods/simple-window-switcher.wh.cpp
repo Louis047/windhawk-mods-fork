@@ -1288,6 +1288,7 @@ static void SWS_UnregisterHotkeys();
 static void ApplySwitcherRegion();
 static void ApplyThemeToWindow(HWND hWnd);
 static void CreateMirrorSwitchers();
+static void ShowMirrorSwitchers();
 static void HideSwitcher();
 static void PaintSwitcher();
 static void PaintSwitcherOverlay();
@@ -2398,6 +2399,16 @@ static void TriggerHoverAnimation(int thumbIdx) {
     }
 }
 
+struct ThumbCacheState {
+    RECT dst;
+    BYTE alpha;
+    BOOL visible;
+};
+// Last-known DWM thumbnail state per handle, used to skip redundant IPC.
+// File scope (instead of function-local) so page changes can synchronously
+// hide outgoing thumbnails while keeping the dedup cache coherent.
+static std::map<HTHUMBNAIL, ThumbCacheState> s_lastThumbState;
+
 static void UpdateThumbnailAnimations() {
     if (!g_settings.showThumbnails || !g_hSwitcher) return;
     if (DockLayoutActive()) {
@@ -2415,13 +2426,6 @@ static void UpdateThumbnailAnimations() {
     int masterPadX = DpiScale(g_settings.switcherPadding, g_dpiX);
     int masterPadY = DpiScale(g_settings.switcherPadding, g_dpiY);
     RECT rcContentClip = { masterPadX, masterPadY, rcClient.right - masterPadX, rcClient.bottom - masterPadY };
-
-    struct ThumbCacheState {
-        RECT dst;
-        BYTE alpha;
-        BOOL visible;
-    };
-    static std::map<HTHUMBNAIL, ThumbCacheState> s_lastThumbState;
 
     auto updateThumb = [&](HTHUMBNAIL hThumb, const RECT& dst, BYTE alpha) {
         if (!hThumb) return;
@@ -4007,42 +4011,45 @@ static HICON TryGetUwpIconFromExplorer(HWND hWnd, int desiredSizePx) {
         DWORD_PTR res = 0;
         LRESULT sendRes = SendMessageTimeoutW(hIpc, g_WM_SWS_GET_UWP_ICON, (WPARAM)hWnd, desiredSizePx, SMTO_ABORTIFHUNG | SMTO_BLOCK, 1000, &res);
         Wh_Log(L"TryGetUwpIconFromExplorer: SendMessageTimeoutW to %p returned %ld, res = %p", hIpc, sendRes, res);
-        if (res) {
-            // On Windows 11 explorer returns usable icon handles via IPC in our environment.
-            // Avoid attempting local AUMID->icon resolution on Win11 to preserve that behavior.
-            if (g_isWin11OrGreater) {
-                return (HICON)res;
-            }
-            // We got an icon handle from Explorer, but HICON handles are process-local —
-            // prefer resolving the AUMID locally and creating an icon in this process.
-            // Try to get the AUMID locally using SHGetPropertyStoreForWindow; if available,
-            // create a local icon via ResolveIconFromAumid and return it.
-            std::wstring aumidLocal;
-            IPropertyStore* ps = NULL;
-            if (SUCCEEDED(SHGetPropertyStoreForWindow(hWnd, IID_PPV_ARGS(&ps))) && ps) {
-                PROPVARIANT pv; PropVariantInit(&pv);
-                if (SUCCEEDED(ps->GetValue(PKEY_AppUserModel_ID, &pv)) && pv.vt == VT_LPWSTR && pv.pwszVal && pv.pwszVal[0]) {
-                    aumidLocal = pv.pwszVal;
-                    Wh_Log(L"TryGetUwpIconFromExplorer: Got AUMID locally = %s", aumidLocal.c_str());
-                }
-                PropVariantClear(&pv);
-                ps->Release();
-            }
-            if (!aumidLocal.empty()) {
-                std::wstring cacheKey = aumidLocal + L"_" + std::to_wstring(desiredSizePx);
-                auto it = g_uwpIconCache.find(cacheKey);
-                if (it != g_uwpIconCache.end()) return it->second;
-                HICON hLocal = ResolveIconFromAumid(aumidLocal.c_str(), desiredSizePx);
-                if (hLocal) {
-                    g_uwpIconCache[cacheKey] = hLocal;
-                    Wh_Log(L"TryGetUwpIconFromExplorer: Resolved local icon %p from AUMID", hLocal);
-                    return hLocal;
-                }
-                Wh_Log(L"TryGetUwpIconFromExplorer: Local ResolveIconFromAumid failed for %s", aumidLocal.c_str());
-            }
-            // As a last resort, return the handle from explorer (may not be valid across processes)
-            return (HICON)res;
+        // NOTE: `res` is intentionally NEVER used as an icon. HICON values are
+        // process-local handle-table indices, so a handle created in the
+        // Explorer process is meaningless here: drawing with it either fails
+        // or aliases an unrelated icon object in this process — observed as
+        // every minimized window showing the focused entry's icon. The IPC
+        // round-trip is only a "Explorer knows this app" gate; the icon itself
+        // is always resolved locally from the window's AUMID below, which
+        // guarantees a valid handle in this process.
+        if (!res) {
+            return NULL;
         }
+        // We got confirmation from Explorer, but HICON handles are process-local —
+        // resolve the AUMID locally and create an icon in this process.
+        // Try to get the AUMID locally using SHGetPropertyStoreForWindow; if available,
+        // create a local icon via ResolveIconFromAumid and return it.
+        std::wstring aumidLocal;
+        IPropertyStore* ps = NULL;
+        if (SUCCEEDED(SHGetPropertyStoreForWindow(hWnd, IID_PPV_ARGS(&ps))) && ps) {
+            PROPVARIANT pv; PropVariantInit(&pv);
+            if (SUCCEEDED(ps->GetValue(PKEY_AppUserModel_ID, &pv)) && pv.vt == VT_LPWSTR && pv.pwszVal && pv.pwszVal[0]) {
+                aumidLocal = pv.pwszVal;
+                Wh_Log(L"TryGetUwpIconFromExplorer: Got AUMID locally = %s", aumidLocal.c_str());
+            }
+            PropVariantClear(&pv);
+            ps->Release();
+        }
+        if (!aumidLocal.empty()) {
+            std::wstring cacheKey = aumidLocal + L"_" + std::to_wstring(desiredSizePx);
+            auto it = g_uwpIconCache.find(cacheKey);
+            if (it != g_uwpIconCache.end()) return it->second;
+            HICON hLocal = ResolveIconFromAumid(aumidLocal.c_str(), desiredSizePx);
+            if (hLocal) {
+                g_uwpIconCache[cacheKey] = hLocal;
+                Wh_Log(L"TryGetUwpIconFromExplorer: Resolved local icon %p from AUMID", hLocal);
+                return hLocal;
+            }
+            Wh_Log(L"TryGetUwpIconFromExplorer: Local ResolveIconFromAumid failed for %s", aumidLocal.c_str());
+        }
+        // NULL lets LoadWindowIcon fall through to exe / WM_GETICON / class icons.
         return NULL;
     } else {
         Wh_Log(L"TryGetUwpIconFromExplorer: WindhawkSWS_IpcWindow not found");
@@ -8203,6 +8210,29 @@ static void RevealPendingSwitcher() {
         g_hMouseHook = SetWindowsHookEx(WH_MOUSE_LL, LowLevelMouseProc, GetModuleHandle(NULL), 0);
     }
 
+    // The pending rect was frozen at invoke time, but DWM source sizes (which
+    // drive Dock's central-preview size and thus the whole window geometry)
+    // typically arrive during the grace period. Refresh once so reveal starts
+    // at final geometry instead of visibly sliding from a stale rect to center.
+    for (auto& w : g_windows) {
+        RefreshEntrySourceSize(w);
+    }
+    if (g_hCurrentMonitor) {
+        ComputeLayout(g_hCurrentMonitor);
+        if (DockLayoutActive()) {
+            UpdateDockPreviewForSelection();
+        }
+        MONITORINFO rmi = { sizeof(rmi) };
+        GetMonitorInfoW(g_hCurrentMonitor, &rmi);
+        int rcx, rcy;
+        GetSwitcherPosition(rmi.rcWork, &rcx, &rcy);
+        g_pendingSwitcherRect = { rcx, rcy, rcx + g_winW, rcy + g_winH };
+        if (g_selectedIndex >= 0 && g_selectedIndex < (int)g_windows.size()) {
+            RectF rr = ToRectF(g_windows[g_selectedIndex].rcCell);
+            SnapSelectionTo(rr);
+        }
+    }
+
     int x = g_pendingSwitcherRect.left;
     int y = g_pendingSwitcherRect.top;
     int w = g_pendingSwitcherRect.right - g_pendingSwitcherRect.left;
@@ -8271,6 +8301,9 @@ static void RevealPendingSwitcher() {
     ShowWindow(g_hSwitcher, SW_SHOWNA);
     BringWindowToTop(g_hSwitcher);
     SetForegroundWindow(g_hSwitcher);
+    // Mirrors already carry frame 0 (pushed by PaintSwitcher above); show them
+    // now so no unpainted white frame is ever composed.
+    ShowMirrorSwitchers();
 
     if (g_animEntranceActive) {
         StartAnimationTicker();
@@ -8423,8 +8456,9 @@ static BOOL WINAPI MirrorEnumProc(HMONITOR hM, HDC, LPRECT, LPARAM) {
             ApplyThemeToWindow(hMirror);
             g_hMirrorSwitchers.push_back(hMirror);
             SetWindowPos(hMirror, HWND_TOPMOST, mx, my, g_winW, g_winH, SWP_NOACTIVATE);
-            ShowWindow(hMirror, SW_SHOWNA);
-            SetActiveWindow(hMirror);
+            // NOTE: mirrors stay hidden here on purpose. They are shown by
+            // ShowMirrorSwitchers() only after PaintSwitcher() has pushed frame 0
+            // into them, so DWM never composes an unpainted (white border) frame.
         }
     }
     return TRUE;
@@ -8447,6 +8481,17 @@ static void DestroyMirrorSwitchers() {
 static void CreateMirrorSwitchers() {
     if (wcscmp(g_settings.switcherDisplayBehavior, L"allMonitors") == 0 || g_showAllMonitors) {
         EnumDisplayMonitors(NULL, NULL, MirrorEnumProc, 0);
+    }
+}
+
+// Shows previously created (hidden) mirrors after their first frame has been
+// painted. SW_SHOWNA keeps them non-activated so the main switcher window
+// retains foreground ownership established by SetForegroundWindow().
+static void ShowMirrorSwitchers() {
+    for (HWND hMirror : g_hMirrorSwitchers) {
+        if (IsWindow(hMirror) && !IsWindowVisible(hMirror)) {
+            ShowWindow(hMirror, SW_SHOWNA);
+        }
     }
 }
 
@@ -8526,6 +8571,15 @@ static void ShowSwitcher(bool sticky, bool immediate = false) {
     g_isCloseHovered = false;
 
     RegisterThumbnailsEarly();
+    // DWM often hasn't produced a surface for just-registered thumbnails yet,
+    // so the query inside RegisterThumbnailsEarly can leave sourceSize at 0
+    // (1x1 placeholder). Fall back to the live window rect for aspect so the
+    // FIRST layout — and therefore the initial centered position, which matters
+    // most for Dock's single-preview sizing — is already near-final. This avoids
+    // the "appears top-right then slides to center" correction right after reveal.
+    for (auto& w : g_windows) {
+        RefreshEntrySourceSize(w);
+    }
     ComputeLayout(hMon);
     if (g_winW <= 0 || g_winH <= 0) return;
     if (DockLayoutActive()) {
@@ -8658,6 +8712,9 @@ static void ShowSwitcher(bool sticky, bool immediate = false) {
     ShowWindow(g_hSwitcher, SW_SHOWNA);
     BringWindowToTop(g_hSwitcher);
     SetForegroundWindow(g_hSwitcher);
+    // Mirrors already carry frame 0 (pushed by PaintSwitcher above); show them
+    // now so no unpainted white frame is ever composed.
+    ShowMirrorSwitchers();
 
     if (g_animEntranceActive) {
         StartAnimationTicker();
@@ -8679,6 +8736,16 @@ static void ShowSwitcher(bool sticky, bool immediate = false) {
 static void HideSwitcher() {
     if (g_hSwitcher) {
         KillTimer(g_hSwitcher, SWS_DYNAMIC_RESIZE_TIMER_ID);
+    }
+    // Hide every switcher window FIRST, before any teardown or WS_EX_LAYERED /
+    // DWM attribute juggling below, so DWM can never compose an intermediate
+    // (white border / unpainted / half-torn-down) frame on exit.
+    if (g_hCloseBtnWnd && IsWindowVisible(g_hCloseBtnWnd)) {
+        ShowWindow(g_hCloseBtnWnd, SW_HIDE);
+    }
+    DestroyMirrorSwitchers();
+    if (g_hSwitcher && IsWindowVisible(g_hSwitcher)) {
+        ShowWindow(g_hSwitcher, SW_HIDE);
     }
     StopAnimationTicker();
     FinishAnimations();
@@ -8783,6 +8850,22 @@ static void StartExitAnimation(bool activateSelectedWindow) {
     if ((!g_isVisible && !g_isPendingShow) || g_animExitActive) return;
 
     if (activateSelectedWindow) {
+        // Switching to target window: hide everything FIRST and only then do
+        // the alpha-zero teardown below, so the WS_EX_LAYERED flip + DWM
+        // attribute writes can never be composited as a white-border flash.
+        // (HideSwitcher() called at the end re-hides as a no-op and keeps the
+        // teardown state identical to before.)
+        if (g_hCloseBtnWnd && IsWindowVisible(g_hCloseBtnWnd)) {
+            ShowWindow(g_hCloseBtnWnd, SW_HIDE);
+        }
+        for (HWND hMirror : g_hMirrorSwitchers) {
+            if (IsWindow(hMirror) && IsWindowVisible(hMirror)) {
+                ShowWindow(hMirror, SW_HIDE);
+            }
+        }
+        if (g_hSwitcher && IsWindowVisible(g_hSwitcher)) {
+            ShowWindow(g_hSwitcher, SW_HIDE);
+        }
         // Switching to target window: immediately zero alpha and hide both switcher windows
         // BEFORE activating target window, ensuring no white border, gray flash, or non-client
         // deactivation frame can ever be visible on screen!
@@ -9879,6 +9962,28 @@ static void CyclePage(int dir) {
     g_layoutStartIndex = pageStarts[targetPage];
     g_isPaginatedView  = true;
     RecomputeAndReposition();  // single real reflow — no flicker, no loops
+
+    // Immediately hide the previous page's live thumbnails instead of letting
+    // them linger for the whole slide duration. Only handles whose window is
+    // gone or truncated on the NEW page are hidden — entries visible on both
+    // pages share handles with the incoming pass (repositioned every tick by
+    // UpdateThumbnailAnimations) and are left untouched. The slide-end cleanup
+    // then only clears bookkeeping, and the dedup cache is updated here so no
+    // redundant hide IPC is issued on the next tick.
+    for (const auto& snap : g_scrollTransition.outgoingItems) {
+        int curIdx = FindWindowIndexByHwnd(snap.hWnd);
+        if (curIdx == -1 || IsWindowTruncated(curIdx)) {
+            for (const auto& kv : snap.hThumbs) {
+                if (kv.second) {
+                    DWM_THUMBNAIL_PROPERTIES p = {};
+                    p.dwFlags = DWM_TNP_VISIBLE;
+                    p.fVisible = FALSE;
+                    DwmUpdateThumbnailProperties(kv.second, &p);
+                    s_lastThumbState[kv.second] = { {}, 0, FALSE };
+                }
+            }
+        }
+    }
 
     // ── Step 6: Place selection on the first visible window of the new page ──
     g_selectedIndex = g_layoutStartIndex % n;
@@ -11140,7 +11245,11 @@ static LRESULT CALLBACK SwitcherWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
         }
 
         if (wParam == SWS_DYNAMIC_RESIZE_TIMER_ID) {
-            if (g_isVisible && !g_windows.empty() && !g_scrollTransition.active && !g_layoutTransition.active) {
+            // Never recenter/resize mid-entrance-fade: a SetWindowPos here is
+            // exactly the visible "drift to center" during reveal. Sizes still
+            // get refreshed at show/reveal time, and the next tick after the
+            // entrance completes applies any genuinely late arrival in one step.
+            if (g_isVisible && !g_windows.empty() && !g_scrollTransition.active && !g_layoutTransition.active && !g_animEntranceActive) {
                 bool anyChanged = false;
                 for (auto& w : g_windows) {
                     if (RefreshEntrySourceSize(w)) {
@@ -11261,10 +11370,17 @@ static LRESULT CALLBACK SwitcherWndProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPA
         RECT rc; GetClientRect(hWnd, &rc);
         int w = rc.right, h = rc.bottom;
         BP_PAINTPARAMS params = { sizeof(params) };
-        params.dwFlags = BPPF_ERASE;
+        // NOTE: no BPPF_ERASE here on purpose. Buffered-paint erase fills the
+        // buffer with opaque white for one frame (white border/corner flash on
+        // reveal). The buffer is explicitly cleared to transparent below and
+        // every branch overpaints it fully.
+        params.dwFlags = 0;
         HDC hdcBuf = NULL;
         HPAINTBUFFER hBP = BeginBufferedPaint(hdc, &rc, BPBF_TOPDOWNDIB, &params, &hdcBuf);
         if (hBP) {
+            if (w > 0 && h > 0) {
+                PatBlt(hdcBuf, 0, 0, w, h, BLACKNESS);
+            }
             if (!g_scrollTransition.active && w > 0 && h > 0) {
                 if (!s_cachedStaticDC || s_cachedStaticW != w || s_cachedStaticH != h) {
                     if (s_cachedStaticDC) {
